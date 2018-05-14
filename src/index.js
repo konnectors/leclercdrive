@@ -1,122 +1,207 @@
 const {
   BaseKonnector,
   requestFactory,
-  signin,
   scrape,
   saveBills,
+  errors,
   log
 } = require('cozy-konnector-libs')
-const request = requestFactory({
-  // the debug mode shows all the details about http request and responses. Very usefull for
-  // debugging but very verbose. That is why it is commented out by default
+let request = requestFactory({
   // debug: true,
-  // activates [cheerio](https://cheerio.js.org/) parsing on each page
-  cheerio: true,
-  // If cheerio is activated do not forget to deactivate json parsing (which is activated by
-  // default in cozy-konnector-libs
-  json: false,
-  // this allows request-promise to keep cookies between requests
+  cheerio: false,
+  json: true,
   jar: true
 })
+const omit = require('lodash/omit')
 
-const baseUrl = 'http://books.toscrape.com'
+const baseUrl = 'https://www.leclercdrive.fr'
 
 module.exports = new BaseKonnector(start)
 
-// The start function is run by the BaseKonnector instance only when it got all the account
-// information (fields). When you run this connector yourself in "standalone" mode or "dev" mode,
-// the account information come from ./konnector-dev-config.json file
 async function start(fields) {
-  await authenticate(fields.login, fields.password)
-  // The BaseKonnector instance expects a Promise as return of the function
-  const $ = await request(`${baseUrl}/index.html`)
-  // cheerio (https://cheerio.js.org/) uses the same api as jQuery (http://jquery.com/)
-  const documents = await parseDocuments($)
+  log('info', 'Authenticating ...')
+  let $ = await authenticate(fields.login, fields.password)
+  log('info', 'Successfully logged in')
 
-  // here we use the saveBills function even if what we fetch are not bills, but this is the most
-  // common case in connectors
-  await saveBills(documents, fields.folderPath, {
-    // this is a bank identifier which will be used to link bills to bank operations. These
-    // identifiers should be at least a word found in the title of a bank operation related to this
-    // bill. It is not case sensitive.
-    identifiers: ['books']
+  log('info', 'Fetching the list of commands')
+  const commands = await fetchAndParseCommands($)
+  log('info', 'Fetching details about each command')
+  await fetchDetails(commands)
+
+  log('info', 'Saving data to Cozy')
+  await saveBills(commands, fields.folderPath, {
+    identifiers: ['leclerc']
   })
 }
 
-// this shows authentication using the [signin function](https://github.com/konnectors/libs/blob/master/packages/cozy-konnector-libs/docs/api.md#module_signin)
-// even if this in another domain here, but it works as an example
-function authenticate(username, password) {
-  return signin({
-    url: `http://quotes.toscrape.com/login`,
-    formSelector: 'form',
-    formData: { username, password },
-    // the validate function will check if
-    validate: (statusCode, $) => {
-      // The login in toscrape.com always works excepted when no password is set
-      if ($(`a[href='/logout']`).length === 1) {
-        return true
-      } else {
-        // cozy-konnector-libs has its own logging function which format these logs with colors in
-        // standalone and dev mode and as JSON in production mode
-        log('error', $('.error').text())
-        return false
-      }
+async function authenticate(login, password) {
+  await request(baseUrl)
+  let body = await request({
+    url: 'https://secure.leclercdrive.fr/drive/connecter.ashz',
+    qs: {
+      callbackJsonp: 'jQuery18303470315301443705_1525874565308',
+      d: JSON.stringify({
+        sLogin: login,
+        sMotDePasse: password,
+        fResterConnecte: false
+      })
     }
   })
+  body = JSON.parse(body.match(/\(((.*))\)/)[1]).objDonneesReponse
+
+  if (body.iTypeConnexion === -1) {
+    throw new Error(errors.LOGIN_FAILED)
+  }
+
+  const details = await request({
+    method: 'POST',
+    url: `${baseUrl}/recupererpointcarte.ashz`,
+    form: {
+      d: JSON.stringify({
+        sIdPointCarte: null,
+        sNoPointLivraison: String(body.sNoPL),
+        sNoPointRetrait: String(body.sNoPR),
+        sIdGroupe: null,
+        sUnivers: 'iDRIVE',
+        sVue: null
+      })
+    }
+  })
+
+  // TODO a lot of data to keep about the magasin
+
+  request = requestFactory({
+    cheerio: true,
+    json: false
+  })
+  return request(details.objDonneesReponse[0].sUrlSite)
 }
 
-// The goal of this function is to parse a html page wrapped by a cheerio instance
-// and return an array of js objects which will be saved to the cozy by saveBills (https://github.com/cozy/cozy-konnector-libs/blob/master/docs/api.md#savebills)
-function parseDocuments($) {
-  // you can find documentation about the scrape function here :
-  // https://github.com/konnectors/libs/blob/master/packages/cozy-konnector-libs/docs/api.md#scrape
-  const docs = scrape(
-    $,
-    {
-      title: {
-        sel: 'h3 a',
-        attr: 'title'
+async function fetchDetails(commands) {
+  for (const command of commands) {
+    log('debug', 'Details for command')
+    log('debug', command)
+    const $ = await request(command.detailsLink)
+    delete command.detailsLink
+    command.products = scrape(
+      $,
+      {
+        title: {
+          sel: `td`,
+          fn: $el => {
+            const $tr = $el.closest('tr')
+            return `${$tr.attr('stitre1')} ${$tr.attr('stitre2')}`.trim()
+          }
+        },
+        id: {
+          sel: `td`,
+          fn: $el => {
+            const $tr = $el.closest('tr')
+            return $tr.attr('iidproduit')
+          }
+        },
+        number: {
+          sel: `p[class*='_Quantite']`,
+          parse: number => Number(number.replace('x', ''))
+        },
+        price: {
+          sel: `p[class*='_Prix']`,
+          parse: parseAmount
+        }
       },
-      amount: {
-        sel: '.price_color',
-        parse: normalizePrice
-      },
-      url: {
-        sel: 'h3 a',
-        attr: 'title',
-        parse: url => `${baseUrl}/${url}`
-      },
-      fileurl: {
-        sel: 'img',
-        attr: 'src',
-        parse: src => `${baseUrl}/${src}`
-      },
-      filename: {
-        sel: 'h3 a',
-        attr: 'title',
-        parse: title => `${title}.jpg`
-      }
-    },
-    'article'
+      `tr[class*='LigneArticle']`
+    )
+  }
+}
+
+async function fetchAndParseCommands($) {
+  // get the link to commands
+  const commandUrl = $(`a[href*='mes-commandes']`)
+    .eq(0)
+    .attr('href')
+
+  $ = await request(commandUrl)
+
+  const $yearSelector = $(`select[id*='ddlFiltreAnnees']`)
+  const years = Array.from($yearSelector.find('option')).map(el =>
+    $(el).attr('value')
   )
-  return docs.map(doc => ({
-    ...doc,
-    // the saveBills function needs a date field
-    // even if it is a little artificial here (these are not real bills)
-    date: new Date(),
-    currency: '€',
-    vendor: 'template',
-    metadata: {
-      // it can be interesting that we add the date of import. This is not mandatory but may be
-      // usefull for debugging or data migration
-      importDate: new Date(),
-      // document version, usefull for migration after change of document structure
-      version: 1
+
+  const $form = $('form')
+  const dataArray = $form.serializeArray()
+  const formData = {}
+  for (let input of dataArray) {
+    formData[input.name] = input.value
+  }
+
+  let result = []
+  for (const year of years) {
+    formData[$yearSelector.attr('name')] = year
+    $ = await request({
+      method: 'POST',
+      url: commandUrl,
+      form: formData
+    })
+
+    const commands = scrape(
+      $,
+      {
+        commandNumber: {
+          sel: `a[id*='NumeroCommande']`,
+          parse: nb => nb.substr(2)
+        },
+        detailsLink: {
+          sel: `a[id*='NumeroCommande']`,
+          attr: 'href'
+        },
+        fileurl: {
+          sel: `a[href*='bon-de-commande.aspx']`,
+          attr: 'href'
+        },
+        dates: {
+          sel: `span[id*='_lblCommandeInfo']`,
+          parse: date => parseFrenchDate(date)
+        },
+        amount: {
+          sel: `p[class*='MontantCommande']`,
+          parse: parseAmount
+        }
+      },
+      `div[id*='_upHistoriqueCommandes'] div[class*='ResumeCommande']`
+    )
+
+    result = result.concat(commands)
+  }
+
+  return result.map(command => {
+    return {
+      ...omit(command, ['dates']),
+      date: command.dates.date,
+      vendor: 'Leclerc Drive',
+      currency: '€',
+      filename: `${command.dates.isoDateString}-${String(
+        command.amount
+      ).replace('.', ',')}€.pdf`
     }
-  }))
+  })
 }
 
-// convert a price string to a float
-function normalizePrice(price) {
-  return parseFloat(price.trim().replace('£', ''))
+// Returns both:
+// - a date object to be used with e.g. `saveBills()`
+// - an ISO date string ready to use in filenames
+function parseFrenchDate(frDateString) {
+  const isoDateString = frDateString
+    .match(/(\d{2})\/(\d{2})\/(\d{4})/)
+    .slice(1, 4)
+    .reverse()
+    .join('-')
+
+  return {
+    isoDateString,
+    date: new Date(isoDateString)
+  }
+}
+
+function parseAmount(amountString) {
+  return parseFloat(amountString.replace(' €', '').replace(',', '.'))
 }
