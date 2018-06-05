@@ -11,9 +11,14 @@ cache:
   yarn: true
   directories:
   - node_modules
+branches:
+  except:
+  - build
+  - latest
 script:
 - yarn lint
 - yarn build
+- yarn run check
 deploy:
 - provider: script
   skip-cleanup: true
