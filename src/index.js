@@ -12,10 +12,10 @@ const {
   errors,
   log
 } = require('cozy-konnector-libs')
-let request = requestFactory({
+const request = requestFactory({
   // debug: true,
-  cheerio: false,
-  json: true,
+  cheerio: true,
+  json: false,
   jar: true
 })
 const omit = require('lodash/omit')
@@ -26,12 +26,19 @@ module.exports = new BaseKonnector(start)
 
 async function start(fields) {
   log('info', 'Authenticating ...')
-  let $ = await authenticate(fields.login, fields.password)
+  const customerDetails = await authenticate(fields.login, fields.password)
   log('info', 'Successfully logged in')
 
+  const magasinURL = await fetchMagasinURL(customerDetails)
+  const $ = await request(magasinURL)
+  // get the link to commands
+  const commandURL = $(`a[href*='mes-commandes']`)
+    .eq(0)
+    .attr('href')
   log('info', 'Fetching the list of commands')
-  const commands = await fetchAndParseCommands($)
+  const commands = await fetchAndParseCommands(commandURL)
   log('info', 'Fetching details about each command')
+  // TODO: update to remove the side-effects
   await fetchDetails(commands)
 
   log('info', 'Saving data to Cozy')
@@ -41,8 +48,12 @@ async function start(fields) {
 }
 
 async function authenticate(login, password) {
-  await request(baseUrl)
-  let body = await request({
+  const requestJSON = requestFactory({
+    cheerio: false,
+    json: true
+  })
+  await requestJSON(baseUrl)
+  const customerDetails = await requestJSON({
     url: 'https://secure.leclercdrive.fr/drive/connecter.ashz',
     qs: {
       callbackJsonp: 'jQuery18303470315301443705_1525874565308',
@@ -53,34 +64,43 @@ async function authenticate(login, password) {
       })
     }
   })
-  body = JSON.parse(body.match(/\(((.*))\)/)[1]).objDonneesReponse
+    .then(toJson)
+    .then(response => response.objDonneesReponse)
 
-  if (body.iTypeConnexion === -1) {
+  if (customerDetails.iTypeConnexion === -1) {
     throw new Error(errors.LOGIN_FAILED)
   }
+  return customerDetails
+}
 
-  const details = await request({
+async function fetchMagasinURL(customerDetails) {
+  const requestJSON = requestFactory({
+    cheerio: false,
+    json: true
+  })
+  const sNoPointLivraison = String(customerDetails.sNoPL)
+  const sNoPointRetrait = String(customerDetails.sNoPR)
+  const formData = {
+    d: JSON.stringify({
+      sIdPointCarte: null,
+      sNoPointLivraison: sNoPointLivraison,
+      sNoPointRetrait: sNoPointRetrait,
+      sIdGroupe: null,
+      sUnivers: 'iDRIVE',
+      sVue: null
+    })
+  }
+  const details = await requestJSON({
     method: 'POST',
     url: `${baseUrl}/recupererpointcarte.ashz`,
-    form: {
-      d: JSON.stringify({
-        sIdPointCarte: null,
-        sNoPointLivraison: String(body.sNoPL),
-        sNoPointRetrait: String(body.sNoPR),
-        sIdGroupe: null,
-        sUnivers: 'iDRIVE',
-        sVue: null
-      })
-    }
+    form: formData
   })
-
   // TODO a lot of data to keep about the magasin
+  return details.objDonneesReponse[0].sUrlSite
+}
 
-  request = requestFactory({
-    cheerio: true,
-    json: false
-  })
-  return request(details.objDonneesReponse[0].sUrlSite)
+function toJson(body) {
+  return JSON.parse(body.match(/\(((.*))\)/)[1])
 }
 
 async function fetchDetails(commands) {
@@ -120,13 +140,8 @@ async function fetchDetails(commands) {
   }
 }
 
-async function fetchAndParseCommands($) {
-  // get the link to commands
-  const commandUrl = $(`a[href*='mes-commandes']`)
-    .eq(0)
-    .attr('href')
-
-  $ = await request(commandUrl)
+async function fetchAndParseCommands(commandUrl) {
+  const $ = await request(commandUrl)
 
   const $yearSelector = $(`select[id*='ddlFiltreAnnees']`)
   const years = Array.from($yearSelector.find('option')).map(el =>
@@ -135,49 +150,17 @@ async function fetchAndParseCommands($) {
 
   const $form = $('form')
   const dataArray = $form.serializeArray()
-  const formData = {}
-  for (let input of dataArray) {
-    formData[input.name] = input.value
-  }
+  const formData = dataArray.reduce(
+    (acc, input) => ({ ...acc, [input.name]: input.value }),
+    {}
+  )
 
-  let result = []
-  for (const year of years) {
-    formData[$yearSelector.attr('name')] = year
-    $ = await request({
-      method: 'POST',
-      url: commandUrl,
-      form: formData
+  const result = await Promise.all(
+    years.map(async year => {
+      formData[$yearSelector.attr('name')] = year
+      return await getCommands(commandUrl, formData)
     })
-
-    const commands = scrape(
-      $,
-      {
-        commandNumber: {
-          sel: `a[id*='NumeroCommande']`,
-          parse: nb => nb.substr(2)
-        },
-        detailsLink: {
-          sel: `a[id*='NumeroCommande']`,
-          attr: 'href'
-        },
-        fileurl: {
-          sel: `a[href*='bon-de-commande.aspx']`,
-          attr: 'href'
-        },
-        dates: {
-          sel: `span[id*='_lblCommandeInfo']`,
-          parse: date => parseFrenchDate(date)
-        },
-        amount: {
-          sel: `p[class*='MontantCommande']`,
-          parse: parseAmount
-        }
-      },
-      `div[id*='_upHistoriqueCommandes'] div[class*='ResumeCommande']`
-    )
-
-    result = result.concat(commands)
-  }
+  )
 
   return result.map(command => {
     return {
@@ -190,6 +173,40 @@ async function fetchAndParseCommands($) {
       ).replace('.', ',')}€.pdf`
     }
   })
+}
+
+async function getCommands(commandUrl, formData) {
+  const $ = await request({
+    method: 'POST',
+    url: commandUrl,
+    form: formData
+  })
+  return scrape(
+    $,
+    {
+      commandNumber: {
+        sel: `a[id*='NumeroCommande']`,
+        parse: nb => nb.substr(2)
+      },
+      detailsLink: {
+        sel: `a[id*='NumeroCommande']`,
+        attr: 'href'
+      },
+      fileurl: {
+        sel: `a[href*='bon-de-commande.aspx']`,
+        attr: 'href'
+      },
+      dates: {
+        sel: `span[id*='_lblCommandeInfo']`,
+        parse: date => parseFrenchDate(date)
+      },
+      amount: {
+        sel: `p[class*='MontantCommande']`,
+        parse: parseAmount
+      }
+    },
+    `div[id*='_upHistoriqueCommandes'] div[class*='ResumeCommande']`
+  )
 }
 
 // Returns both:
