@@ -12,13 +12,13 @@ const {
   errors,
   log
 } = require('cozy-konnector-libs')
-let request = requestFactory({
+const cookieJar = require('request-promise').jar()
+const request = requestFactory({
   // debug: true,
-  cheerio: false,
-  json: true,
-  jar: true
+  cheerio: true,
+  json: false,
+  jar: cookieJar
 })
-const omit = require('lodash/omit')
 
 const baseUrl = 'https://www.leclercdrive.fr'
 
@@ -26,13 +26,18 @@ module.exports = new BaseKonnector(start)
 
 async function start(fields) {
   log('info', 'Authenticating ...')
-  let $ = await authenticate(fields.login, fields.password)
+  const customerDetails = await authenticate(fields.login, fields.password)
   log('info', 'Successfully logged in')
 
+  const magasinURL = await fetchMagasinURL(customerDetails)
+  const $ = await request(magasinURL)
+  // get the link to commands
+  const commandURL = $(`a[href*='mes-commandes']`)
+    .eq(0)
+    .attr('href')
   log('info', 'Fetching the list of commands')
-  const commands = await fetchAndParseCommands($)
+  const commands = await fetchAndParseCommands(commandURL)
   log('info', 'Fetching details about each command')
-  await fetchDetails(commands)
 
   log('info', 'Saving data to Cozy')
   await saveBills(commands, fields.folderPath, {
@@ -41,8 +46,13 @@ async function start(fields) {
 }
 
 async function authenticate(login, password) {
-  await request(baseUrl)
-  let body = await request({
+  const requestJSON = requestFactory({
+    cheerio: false,
+    json: true,
+    jar: cookieJar
+  })
+  await requestJSON(baseUrl)
+  const customerDetails = await requestJSON({
     url: 'https://secure.leclercdrive.fr/drive/connecter.ashz',
     qs: {
       callbackJsonp: 'jQuery18303470315301443705_1525874565308',
@@ -53,143 +63,168 @@ async function authenticate(login, password) {
       })
     }
   })
-  body = JSON.parse(body.match(/\(((.*))\)/)[1]).objDonneesReponse
+    .then(toJson)
+    .then(response => response.objDonneesReponse)
 
-  if (body.iTypeConnexion === -1) {
+  if (customerDetails.iTypeConnexion === -1) {
     throw new Error(errors.LOGIN_FAILED)
   }
+  return customerDetails
+}
 
-  const details = await request({
+async function fetchMagasinURL(customerDetails) {
+  const requestJSON = requestFactory({
+    cheerio: false,
+    json: true,
+    jar: cookieJar
+  })
+  const sNoPointLivraison = String(customerDetails.sNoPL)
+  const sNoPointRetrait = String(customerDetails.sNoPR)
+  const formData = {
+    d: JSON.stringify({
+      sIdPointCarte: null,
+      sNoPointLivraison: sNoPointLivraison,
+      sNoPointRetrait: sNoPointRetrait,
+      sIdGroupe: null,
+      sUnivers: 'iDRIVE',
+      sVue: null
+    })
+  }
+  const details = await requestJSON({
     method: 'POST',
     url: `${baseUrl}/recupererpointcarte.ashz`,
-    form: {
-      d: JSON.stringify({
-        sIdPointCarte: null,
-        sNoPointLivraison: String(body.sNoPL),
-        sNoPointRetrait: String(body.sNoPR),
-        sIdGroupe: null,
-        sUnivers: 'iDRIVE',
-        sVue: null
-      })
-    }
+    form: formData
   })
-
   // TODO a lot of data to keep about the magasin
-
-  request = requestFactory({
-    cheerio: true,
-    json: false
-  })
-  return request(details.objDonneesReponse[0].sUrlSite)
+  return details.objDonneesReponse[0].sUrlSite
 }
 
-async function fetchDetails(commands) {
-  for (const command of commands) {
-    log('debug', 'Details for command')
-    log('debug', command)
-    const $ = await request(command.detailsLink)
-    delete command.detailsLink
-    command.products = scrape(
-      $,
-      {
-        title: {
-          sel: `td`,
-          fn: $el => {
-            const $tr = $el.closest('tr')
-            return `${$tr.attr('stitre1')} ${$tr.attr('stitre2')}`.trim()
-          }
-        },
-        id: {
-          sel: `td`,
-          fn: $el => {
-            const $tr = $el.closest('tr')
-            return $tr.attr('iidproduit')
-          }
-        },
-        number: {
-          sel: `p[class*='_Quantite']`,
-          parse: number => Number(number.replace('x', ''))
-        },
-        price: {
-          sel: `p[class*='_Prix']`,
-          parse: parseAmount
-        }
-      },
-      `tr[class*='LigneArticle']`
-    )
-  }
+function toJson(body) {
+  return JSON.parse(body.match(/\(((.*))\)/)[1])
 }
 
-async function fetchAndParseCommands($) {
-  // get the link to commands
-  const commandUrl = $(`a[href*='mes-commandes']`)
-    .eq(0)
-    .attr('href')
+async function fetchAndParseCommands(commandURL) {
+  const $ = await request(commandURL)
 
-  $ = await request(commandUrl)
+  const formData = getFormData($)
+  const years = getYears($)
 
-  const $yearSelector = $(`select[id*='ddlFiltreAnnees']`)
-  const years = Array.from($yearSelector.find('option')).map(el =>
-    $(el).attr('value')
-  )
+  const commands = await getCommands(years, commandURL, formData)
 
-  const $form = $('form')
-  const dataArray = $form.serializeArray()
-  const formData = {}
-  for (let input of dataArray) {
-    formData[input.name] = input.value
-  }
+  const formatedCommands = commands.map(({ dates, ...command }) => ({
+    ...command,
+    date: dates.date,
+    vendor: 'Leclerc Drive',
+    currency: 'EUR',
+    filename: `${dates.isoDateString}-${String(command.amount).replace(
+      '.',
+      ','
+    )}EUR.pdf`
+  }))
 
-  let result = []
-  for (const year of years) {
-    formData[$yearSelector.attr('name')] = year
-    $ = await request({
-      method: 'POST',
-      url: commandUrl,
-      form: formData
+  return Promise.all(
+    formatedCommands.map(async ({ detailsLink, ...command }) => {
+      const $ = await request(detailsLink)
+      const products = scrape(
+        $,
+        {
+          title: {
+            sel: `td`,
+            fn: $el => {
+              const $tr = $el.closest('tr')
+              return `${$tr.attr('stitre1')} ${$tr.attr('stitre2')}`.trim()
+            }
+          },
+          id: {
+            sel: `td`,
+            fn: $el => {
+              const $tr = $el.closest('tr')
+              return $tr.attr('iidproduit')
+            }
+          },
+          number: {
+            sel: `p[class*='_Quantite']`,
+            parse: number => Number(number.replace('x', ''))
+          },
+          price: {
+            sel: `p[class*='_Prix']`,
+            parse: parseAmount
+          }
+        },
+        `tr[class*='LigneArticle']`
+      )
+
+      return {
+        ...command,
+        products
+      }
     })
+  )
+}
 
-    const commands = scrape(
-      $,
-      {
-        commandNumber: {
-          sel: `a[id*='NumeroCommande']`,
-          parse: nb => nb.substr(2)
-        },
-        detailsLink: {
-          sel: `a[id*='NumeroCommande']`,
-          attr: 'href'
-        },
-        fileurl: {
-          sel: `a[href*='bon-de-commande.aspx']`,
-          attr: 'href'
-        },
-        dates: {
-          sel: `span[id*='_lblCommandeInfo']`,
-          parse: date => parseFrenchDate(date)
-        },
-        amount: {
-          sel: `p[class*='MontantCommande']`,
-          parse: parseAmount
-        }
-      },
-      `div[id*='_upHistoriqueCommandes'] div[class*='ResumeCommande']`
+function getCommands(years, commandURL, formData) {
+  return Promise.all(
+    years.map(year =>
+      getCommandsForYear(commandURL, {
+        ...formData,
+        ...year
+      })
     )
+  ).then(flatten)
+}
 
-    result = result.concat(commands)
+function getYears($) {
+  const yearSelectElement = $(`select[id*='ddlFiltreAnnees']`)
+  const years = Array.from(yearSelectElement.find('option')).map(el => ({
+    [yearSelectElement.attr('name')]: $(el).attr('value')
+  }))
+  if (years.length === 0) {
+    throw new Error(errors.VENDOR_DOWN)
   }
+  return years
+}
 
-  return result.map(command => {
-    return {
-      ...omit(command, ['dates']),
-      date: command.dates.date,
-      vendor: 'Leclerc Drive',
-      currency: '€',
-      filename: `${command.dates.isoDateString}-${String(
-        command.amount
-      ).replace('.', ',')}€.pdf`
-    }
+function getFormData($) {
+  const formElement = $('form')
+  const dataArray = formElement.serializeArray()
+  return dataArray.reduce(
+    (acc, input) => ({ ...acc, [input.name]: input.value }),
+    {}
+  )
+}
+
+async function getCommandsForYear(commandUrl, formData) {
+  const $ = await request({
+    method: 'POST',
+    url: commandUrl,
+    form: formData
   })
+  return scrape(
+    $,
+    {
+      commandNumber: {
+        sel: `a[id*='NumeroCommande']`,
+        parse: nb => nb.substr(2)
+      },
+      detailsLink: {
+        sel: `a[id*='NumeroCommande']`,
+        attr: 'href'
+      },
+      fileurl: {
+        sel: `a[href*='bon-de-commande.aspx']`,
+        attr: 'href'
+      },
+      dates: {
+        sel: `span[id*='_lblCommandeInfo']`,
+        parse: date => parseFrenchDate(date)
+      },
+      amount: {
+        sel: `p[class*='MontantCommande']`,
+        parse: parseAmount
+      }
+    },
+    `div[id*='_upHistoriqueCommandes'] div[class*='ResumeCommande']`
+  )
 }
 
 // Returns both:
@@ -210,4 +245,8 @@ function parseFrenchDate(frDateString) {
 
 function parseAmount(amountString) {
   return parseFloat(amountString.replace(' €', '').replace(',', '.'))
+}
+
+function flatten(arr) {
+  return [].concat(...arr)
 }
