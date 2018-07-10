@@ -1211,16 +1211,6 @@ cozy-app-publish@0.3.6:
     node-fetch "2.1.2"
     prompt "1.0.0"
 
-cozy-client-js@0.11.0, cozy-client-js@^0.11.0:
-  version "0.11.0"
-  resolved "https://registry.yarnpkg.com/cozy-client-js/-/cozy-client-js-0.11.0.tgz#4a031e92eafa4a7399b5e17d7dab3b043b984846"
-  dependencies:
-    core-js "^2.5.3"
-    isomorphic-fetch "^2.2.1"
-    pouchdb "6.4.3"
-    pouchdb-adapter-cordova-sqlite "git+https://github.com/SnceGroup/pouchdb-adapter-cordova-sqlite.git#f3ee23009b70209c611435d57491aa77fb88802a"
-    pouchdb-find "6.4.3"
-
 cozy-client-js@0.9.0:
   version "0.9.0"
   resolved "https://registry.yarnpkg.com/cozy-client-js/-/cozy-client-js-0.9.0.tgz#ef81ac66a2858427e23da3c214f1a169e9972a8c"
@@ -1229,6 +1219,16 @@ cozy-client-js@0.9.0:
     pouchdb "6.1.1"
     pouchdb-adapter-cordova-sqlite "https://github.com/SnceGroup/pouchdb-adapter-cordova-sqlite.git#f3ee23009b70209c611435d57491aa77fb88802a"
     pouchdb-find "0.10.4"
+
+cozy-client-js@^0.11.0:
+  version "0.11.0"
+  resolved "https://registry.yarnpkg.com/cozy-client-js/-/cozy-client-js-0.11.0.tgz#4a031e92eafa4a7399b5e17d7dab3b043b984846"
+  dependencies:
+    core-js "^2.5.3"
+    isomorphic-fetch "^2.2.1"
+    pouchdb "6.4.3"
+    pouchdb-adapter-cordova-sqlite "git+https://github.com/SnceGroup/pouchdb-adapter-cordova-sqlite.git#f3ee23009b70209c611435d57491aa77fb88802a"
+    pouchdb-find "6.4.3"
 
 cozy-jobs-cli@1.4.4:
   version "1.4.4"
@@ -1248,16 +1248,16 @@ cozy-jobs-cli@1.4.4:
     regenerator-runtime "^0.12.0"
     replay "2.3.0"
 
-cozy-konnector-libs@4.7.0:
-  version "4.7.0"
-  resolved "https://registry.yarnpkg.com/cozy-konnector-libs/-/cozy-konnector-libs-4.7.0.tgz#f46cd2f9d5799f1d848d8f1bbbdc35c2e7f7ab50"
+cozy-konnector-libs@4.7.2:
+  version "4.7.2"
+  resolved "https://registry.yarnpkg.com/cozy-konnector-libs/-/cozy-konnector-libs-4.7.2.tgz#3b42ad33bfcc9030e8c136d5c4731bbdf53366b5"
   dependencies:
     bluebird "3.5.1"
     bluebird-retry "0.11.0"
     btoa "1.2.1"
     cheerio "1.0.0-rc.2"
-    cozy-client-js "0.11.0"
-    cozy-logger "^1.1.8"
+    cozy-client-js "0.9.0"
+    cozy-logger "^1.1.9"
     date-fns "1.29.0"
     geco "0.11.1"
     lodash "4.17.10"
@@ -1293,6 +1293,12 @@ cozy-konnector-libs@^4.6.1:
 cozy-logger@^1.1.8:
   version "1.1.8"
   resolved "https://registry.yarnpkg.com/cozy-logger/-/cozy-logger-1.1.8.tgz#4ef7f009b7e63f6d0e1d8515e3758ffa351ea16e"
+  dependencies:
+    json-stringify-safe "5.0.1"
+
+cozy-logger@^1.1.9:
+  version "1.1.9"
+  resolved "https://registry.yarnpkg.com/cozy-logger/-/cozy-logger-1.1.9.tgz#ea35beeb14b4cb80b363a131d324be3a3b2f8db7"
   dependencies:
     json-stringify-safe "5.0.1"
 
