@@ -41,7 +41,8 @@ async function start(fields) {
 
   log('info', 'Saving data to Cozy')
   await saveBills(commands, fields.folderPath, {
-    identifiers: ['leclerc']
+    identifiers: ['leclerc'],
+    contentType: 'application/pdf'
   })
 }
 
@@ -116,6 +117,9 @@ async function fetchAndParseCommands(commandURL) {
     date: dates.date,
     vendor: 'Leclerc Drive',
     currency: 'EUR',
+    requestOptions: {
+      jar: cookieJar
+    },
     filename: `${dates.isoDateString}-${String(command.amount).replace(
       '.',
       ','
