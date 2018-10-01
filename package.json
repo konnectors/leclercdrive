@@ -47,6 +47,7 @@
     "git-directory-deploy": "1.5.1",
     "husky": "1.0.1",
     "konitor": "0.9.0",
+    "svgo": "1.1.1",
     "webpack": "4.20.2",
     "webpack-cli": "3.1.2"
   }
