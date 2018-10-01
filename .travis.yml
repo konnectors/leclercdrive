@@ -1,0 +1,41 @@
+language: node_js
+node_js:
+- '8'
+env:
+  global:
+  - GH_USER_EMAIL="travis@example.org"
+  - GH_USER_NAME="cozy-bot"
+  - DEPLOY_REPOSITORY="git@github.com:konnectors/leclercdrive.git"
+  - secure: c0FrVAP3V+7Ln0lidd5UH//l1oqORLRRCKmLqsb+eU7PsQk6q9jFfpULxR44AAo6SVSEwuVQ8qGrq317DK0zRlzdQGepou5YsdZ9IaVAzQSUiVdV0E3OLKjfzLBwSHZEuOD+WHXq/EZiMB4eb5Os9juImrXlvoTAbCPpPIYSCuMCSEFombpcIgsL1cp4UHpMxKtIQ3InXaBYFAXTazPodZqGPDvxcwQMEyVe0aTi3A/lZ0ppYCdnu1fa31thTMJKQXQ38T7iiBHjIOCCbjltVz2j9yuvrHbOEpptlhSYKBok1u/Nxx0d9ZhAbQDV9TX7pN8EipffdS/qPu6PWOYdOM1ciPT11ixmcZ9JpKjR5uu+yLuGIWjNQ5wcTN71JL855btHTJIpkL/PA7THy4POrmwBcZrSNxpQ++iLg/wmeUlnwTp8sRGsh+ErqEdllhSDr2Q6i2iwdKLBq97xN9gedEc5d8CacoylphPcLfdBhhY1goUPe70/cDh0Jpgkh+35aqUNM70VviiAq20IR7XKi7U/Hh8GI2ZLpXmQ+odEWs22HnXjit4c9OQiCHfLj4X577ViJVaqt3goMsjBZobUt8UhEN/C7a81rXih6rBlbDUo8FlePmcbY9qsG2qMENPGiAG4rxsq7QXoHTDibVZOnx1Y47dxLLX4JyCWF2byu04=
+cache:
+  yarn: true
+  directories:
+  - node_modules
+branches:
+  except:
+  - build
+  - build-debug
+script:
+- yarn lint
+- yarn build
+# - yarn run check
+deploy:
+- provider: script
+  skip-cleanup: true
+  script: DEPLOY_BRANCH=build yarn deploy && yarn cozyPublish
+  on:
+    branch: master
+- provider: script
+  skip-cleanup: true
+  script: DEPLOY_BRANCH=build yarn deploy && yarn cozyPublish
+  on:
+    tags: true
+before_install:
+- openssl aes-256-cbc -K $encrypted_befb43cb4114_key -iv $encrypted_befb43cb4114_iv
+  -in github_deploy_key.enc -out /tmp/github_deploy_key -d
+- eval "$(ssh-agent -s)"
+- chmod 600 /tmp/github_deploy_key
+- ssh-add /tmp/github_deploy_key
+after_deploy:
+- rm /tmp/github_deploy_key
+- ssh-add -D
