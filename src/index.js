@@ -12,12 +12,11 @@ const {
   errors,
   log
 } = require('cozy-konnector-libs')
-const cookieJar = require('request-promise').jar()
 const request = requestFactory({
   // debug: true,
   cheerio: true,
   json: false,
-  jar: cookieJar
+  jar: true
 })
 
 const baseUrl = 'https://www.leclercdrive.fr'
@@ -50,7 +49,7 @@ async function authenticate(login, password) {
   const requestJSON = requestFactory({
     cheerio: false,
     json: true,
-    jar: cookieJar
+    jar: true
   })
   await requestJSON(baseUrl)
   const customerDetails = await requestJSON({
@@ -77,27 +76,16 @@ async function fetchMagasinURL(customerDetails) {
   const requestJSON = requestFactory({
     cheerio: false,
     json: true,
-    jar: cookieJar
+    jar: true
   })
-  const sNoPointLivraison = String(customerDetails.sNoPL)
-  const sNoPointRetrait = String(customerDetails.sNoPR)
-  const formData = {
-    d: JSON.stringify({
-      sIdPointCarte: null,
-      sNoPointLivraison: sNoPointLivraison,
-      sNoPointRetrait: sNoPointRetrait,
-      sIdGroupe: null,
-      sUnivers: 'iDRIVE',
-      sVue: null
-    })
-  }
-  const details = await requestJSON({
-    method: 'POST',
-    url: `${baseUrl}/recupererpointcarte.ashz`,
-    form: formData
-  })
-  // TODO a lot of data to keep about the magasin
-  return details.objDonneesReponse[0].sUrlSite
+  const details = await requestJSON(
+    `https://api-pointsretrait.leclercdrive.fr/API_PointsRetrait/ApiPointsRetrait/PointsRetraitParNoPointLivraison/na/drive/${
+      customerDetails.sNoPL
+    }`
+  )
+
+  // TODO a lot of data to keep about the shop
+  return details.sReponse[0].sUrlSiteCourses
 }
 
 function toJson(body) {
@@ -117,9 +105,6 @@ async function fetchAndParseCommands(commandURL) {
     date: dates.date,
     vendor: 'Leclerc Drive',
     currency: 'EUR',
-    requestOptions: {
-      jar: cookieJar
-    },
     filename: `${dates.isoDateString}-${String(command.amount).replace(
       '.',
       ','
