@@ -38,7 +38,7 @@
     "lodash": "4.17.11"
   },
   "devDependencies": {
-    "copy-webpack-plugin": "4.5.3",
+    "copy-webpack-plugin": "4.5.4",
     "cozy-app-publish": "0.8.5",
     "cozy-jobs-cli": "1.5.1",
     "eslint": "5.7.0",
