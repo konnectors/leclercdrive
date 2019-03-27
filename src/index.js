@@ -12,11 +12,15 @@ const {
   errors,
   log
 } = require('cozy-konnector-libs')
+const userAgent = 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:62.0) Gecko/20100101 Firefox/62.0 Cozycloud'
 const request = requestFactory({
   // debug: true,
   cheerio: true,
   json: false,
-  jar: true
+  jar: true,
+  headers: {
+    'User-Agent': userAgent // Not working now due to bug, set in each request too
+  }
 })
 
 const baseUrl = 'https://www.leclercdrive.fr'
@@ -41,7 +45,8 @@ async function start(fields) {
   log('info', 'Saving data to Cozy')
   await saveBills(commands, fields.folderPath, {
     identifiers: ['leclerc'],
-    contentType: 'application/pdf'
+    contentType: 'application/pdf',
+    requestInstance: request
   })
 }
 
@@ -49,7 +54,11 @@ async function authenticate(login, password) {
   const requestJSON = requestFactory({
     cheerio: false,
     json: true,
-    jar: true
+    jar: true,
+    debug: true,
+    headers: {
+      'User-Agent': userAgent
+    }
   })
   await requestJSON(baseUrl)
   const customerDetails = await requestJSON({
@@ -76,7 +85,10 @@ async function fetchMagasinURL(customerDetails) {
   const requestJSON = requestFactory({
     cheerio: false,
     json: true,
-    jar: true
+    jar: true,
+    headers: {
+      'User-Agent': userAgent
+    }
   })
   const details = await requestJSON(
     `https://api-pointsretrait.leclercdrive.fr/API_PointsRetrait/ApiPointsRetrait/PointsRetraitParNoPointLivraison/na/drive/${
