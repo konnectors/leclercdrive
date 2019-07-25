@@ -12,7 +12,8 @@ const {
   errors,
   log
 } = require('cozy-konnector-libs')
-const userAgent = 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:62.0) Gecko/20100101 Firefox/62.0 Cozycloud'
+const userAgent =
+  'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:62.0) Gecko/20100101 Firefox/62.0 Cozycloud'
 const request = requestFactory({
   // debug: true,
   cheerio: true,
