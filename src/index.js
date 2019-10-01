@@ -92,9 +92,7 @@ async function fetchMagasinURL(customerDetails) {
     }
   })
   const details = await requestJSON(
-    `https://api-pointsretrait.leclercdrive.fr/API_PointsRetrait/ApiPointsRetrait/PointsRetraitParNoPointLivraison/na/drive/${
-      customerDetails.sNoPL
-    }`
+    `https://api-pointsretrait.leclercdrive.fr/API_PointsRetrait/ApiPointsRetrait/PointsRetraitParNoPointLivraison/na/drive/${customerDetails.sNoPL}`
   )
 
   // TODO a lot of data to keep about the shop
