@@ -1,176 +1,287 @@
-// Force sentry DSN into environment variables
-// In the future, will be set by the stack
 process.env.SENTRY_DSN =
   process.env.SENTRY_DSN ||
   'https://1f3bcbb057c5435da229ff1039b48baf:1d9127715e7c4f728509d22a2bfe99a5@sentry.cozycloud.cc/47'
 
 const {
-  BaseKonnector,
-  requestFactory,
+  CookieKonnector,
   scrape,
-  saveBills,
   errors,
-  log
+  log,
+  solveCaptcha
 } = require('cozy-konnector-libs')
-const userAgent =
-  'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:62.0) Gecko/20100101 Firefox/62.0 Cozycloud'
-const request = requestFactory({
-  // debug: true,
-  cheerio: true,
-  json: false,
-  jar: true,
-  headers: {
-    'User-Agent': userAgent // Not working now due to bug, set in each request too
-  }
-})
+
+const get = require('lodash/get')
 
 const baseUrl = 'https://www.leclercdrive.fr'
 
-module.exports = new BaseKonnector(start)
+class LeclercConnector extends CookieKonnector {
+  async testSession() {
+    const resp = await this.request.get(baseUrl, {
+      resolveWithFullResponse: true
+    })
+    const mag = new URL(resp.request.uri.href).searchParams.get('mag')
 
-async function start(fields) {
-  log('info', 'Authenticating ...')
-  const customerDetails = await authenticate(fields.login, fields.password)
-  log('info', 'Successfully logged in')
-
-  const magasinURL = await fetchMagasinURL(customerDetails)
-  const $ = await request(magasinURL)
-  // get the link to commands
-  const commandURL = $(`a[href*='mes-commandes']`)
-    .eq(0)
-    .attr('href')
-  log('info', 'Fetching the list of commands')
-  const commands = await fetchAndParseCommands(commandURL)
-  log('info', 'Fetching details about each command')
-
-  log('info', 'Saving data to Cozy')
-  await saveBills(commands, fields.folderPath, {
-    identifiers: ['leclerc'],
-    contentType: 'application/pdf',
-    requestInstance: request
-  })
-}
-
-async function authenticate(login, password) {
-  const requestJSON = requestFactory({
-    cheerio: false,
-    json: true,
-    jar: true,
-    debug: true,
-    headers: {
-      'User-Agent': userAgent
-    }
-  })
-  await requestJSON(baseUrl)
-  const customerDetails = await requestJSON({
-    url: 'https://secure.leclercdrive.fr/drive/connecter.ashz',
-    qs: {
-      callbackJsonp: 'jQuery18303470315301443705_1525874565308',
-      d: JSON.stringify({
-        sLogin: login,
-        sMotDePasse: password,
-        fResterConnecte: false
-      })
-    }
-  })
-    .then(toJson)
-    .then(response => response.objDonneesReponse)
-
-  if (customerDetails.iTypeConnexion === -1) {
-    throw new Error(errors.LOGIN_FAILED)
+    if (mag) return mag
+    else return false
   }
-  return customerDetails
-}
 
-async function fetchMagasinURL(customerDetails) {
-  const requestJSON = requestFactory({
-    cheerio: false,
-    json: true,
-    jar: true,
-    headers: {
-      'User-Agent': userAgent
+  async fetch(fields) {
+    await this.deactivateAutoSuccessfulLogin()
+    this.requestJSON = this.requestFactory({
+      cheerio: false,
+      json: true
+    })
+
+    const mag =
+      (await this.testSession()) ||
+      (await this.authenticate(fields.login, fields.password))
+
+    await this.notifySuccessfulLogin()
+
+    const magasinURL = await this.fetchMagasinURL(mag)
+    const $ = await this.request(magasinURL)
+    // get the link to commands
+    const commandURL = $(`a[href*='mes-commandes']`)
+      .eq(0)
+      .attr('href')
+    log('info', 'Fetching the list of commands')
+    const commands = await this.fetchAndParseCommands(commandURL)
+    log('info', 'Fetching details about each command')
+
+    log('info', 'Saving data to Cozy')
+    await this.saveBills(commands, fields.folderPath, {
+      contentType: 'application/pdf',
+      linkBankOperations: false,
+      sourceAccount: this.accountId,
+      sourceAccountIdentifier: fields.login,
+      keys: ['vendorRef'],
+      fileIdAttributes: ['vendorRef']
+    })
+  }
+
+  async solveDataDomeCaptcha(err) {
+    log('info', 'solving datadome captcha...')
+    let ccid = this._jar
+      .getCookies(baseUrl)
+      .find(cookie => cookie.key === 'datadome').value
+    const websiteURL = err.error.url + '&cid=' + ccid
+
+    const $ = await this.request(websiteURL)
+    const formAction = new URLSearchParams(
+      $('#human-contact-form')
+        .attr('action')
+        .split('?')
+        .pop()
+    )
+
+    const hash = formAction.get('hash')
+    const cid = formAction.get('cid')
+    const icid = formAction.get('initialCid')
+
+    const websiteKey = '6LccSjEUAAAAANCPhaM2c\u002DWiRxCZ5CzsjR_vd8uX'
+    const captchaToken = await solveCaptcha({ websiteURL, websiteKey })
+    const ua =
+      'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:62.0) Gecko/20100101 Firefox/62.0'
+
+    const reg = /there is a robot on the same network \(IP (.*)\) as you/
+    const IP = $.html()
+      .split('\n')
+      .find(line => line.match(reg))
+      .match(reg)[1]
+    let url = 'https://c.datado.me/captcha/check'
+
+    await this.requestJSON({
+      url,
+      qs: {
+        callbackJsonp: `jQuery18303470315301443705_${Date.now()}`,
+        cid,
+        icid,
+        ccid,
+        'g-recaptcha-response': captchaToken,
+        hash,
+        ua,
+        referer: baseUrl,
+        parent_url: baseUrl,
+        'x-forwarded-for': IP
+      }
+    })
+    throw new Error('captcha solved')
+  }
+
+  async tryAuth(login, password) {
+    await this.request.get(baseUrl)
+    try {
+      const json = await this.requestJSON({
+        url: 'https://secure.leclercdrive.fr/drive/connecter.ashz',
+        qs: {
+          callbackJsonp: `jQuery18303470315301443705_${Date.now()}`,
+          d: JSON.stringify({
+            sLogin: login,
+            sMotDePasse: password,
+            fResterConnecte: true
+          })
+        }
+      })
+      return json
+    } catch (err) {
+      const captchaUrl = get(err, 'error.url')
+      if (captchaUrl) {
+        await this.solveDataDomeCaptcha(err)
+      } else {
+        log('error', err.message)
+        throw new Error(errors.VENDOR_DOWN)
+      }
     }
-  })
-  const details = await requestJSON(
-    `https://api-pointsretrait.leclercdrive.fr/API_PointsRetrait/ApiPointsRetrait/PointsRetraitParNoPointLivraison/na/drive/${customerDetails.sNoPL}`
-  )
+  }
 
-  // TODO a lot of data to keep about the shop
-  return details.sReponse[0].sUrlSiteCourses
+  async authenticate(login, password) {
+    log('info', 'Authenticating ...')
+    let json
+    try {
+      log('debug', 'first try')
+      json = await this.tryAuth(login, password)
+    } catch (err) {
+      if (err.message === 'captcha solved') {
+        log('debug', 'second try')
+        json = await this.tryAuth(login, password)
+      } else {
+        throw err
+      }
+    }
+
+    const customerDetails = toJson(json).objDonneesReponse
+
+    if (customerDetails.iTypeConnexion === -1) {
+      throw new Error(errors.LOGIN_FAILED)
+    }
+    log('info', 'Successfully logged in')
+    return customerDetails.sNoPL
+  }
+
+  async fetchMagasinURL(mag) {
+    const details = await this.requestJSON(
+      `https://api-pointsretrait.leclercdrive.fr/API_PointsRetrait/ApiPointsRetrait/PointsRetraitParNoPointLivraison/na/drive/${mag}`
+    )
+
+    // TODO a lot of data to keep about the shop
+    return details.sReponse[0].sUrlSiteCourses
+  }
+
+  async fetchAndParseCommands(commandURL) {
+    const $ = await this.request(commandURL)
+
+    const formData = getFormData($)
+    const years = getYears($)
+
+    const commands = await this.getCommands(years, commandURL, formData)
+
+    const formatedCommands = commands.map(({ dates, ...command }) => ({
+      ...command,
+      date: dates.date,
+      vendor: 'Leclerc Drive',
+      currency: 'EUR',
+      filename: `${dates.isoDateString}-${String(command.amount).replace(
+        '.',
+        ','
+      )}EUR.pdf`
+    }))
+
+    return Promise.all(
+      formatedCommands.map(async ({ detailsLink, ...command }) => {
+        const $ = await this.request(detailsLink)
+        const products = scrape(
+          $,
+          {
+            title: {
+              sel: `td`,
+              fn: $el => {
+                const $tr = $el.closest('tr')
+                return `${$tr.attr('stitre1')} ${$tr.attr('stitre2')}`.trim()
+              }
+            },
+            id: {
+              sel: `td`,
+              fn: $el => {
+                const $tr = $el.closest('tr')
+                return $tr.attr('iidproduit')
+              }
+            },
+            number: {
+              sel: `p[class*='_Quantite']`,
+              parse: number => Number(number.replace('x', ''))
+            },
+            price: {
+              sel: `p[class*='_Prix']`,
+              parse: parseAmount
+            }
+          },
+          `tr[class*='LigneArticle']`
+        )
+
+        return {
+          ...command,
+          products
+        }
+      })
+    )
+  }
+
+  getCommands(years, commandURL, formData) {
+    return Promise.all(
+      years.map(year =>
+        this.getCommandsForYear(commandURL, {
+          ...formData,
+          ...year
+        })
+      )
+    ).then(flatten)
+  }
+
+  async getCommandsForYear(commandUrl, formData) {
+    const $ = await this.request({
+      method: 'POST',
+      url: commandUrl,
+      form: formData
+    })
+    return scrape(
+      $,
+      {
+        vendorRef: {
+          sel: `a[id*='NumeroCommande']`,
+          parse: nb => nb.substr(2)
+        },
+        detailsLink: {
+          sel: `a[id*='NumeroCommande']`,
+          attr: 'href'
+        },
+        fileurl: {
+          sel: `a[href*='bon-de-commande.aspx']`,
+          attr: 'href'
+        },
+        dates: {
+          sel: `span[id*='_lblCommandeInfo']`,
+          parse: date => parseFrenchDate(date)
+        },
+        amount: {
+          sel: `p[class*='MontantCommande']`,
+          parse: parseAmount
+        }
+      },
+      `div[id*='_upHistoriqueCommandes'] div[class*='ResumeCommande']`
+    )
+  }
 }
+
+const connector = new LeclercConnector({
+  // debug: true,
+  cheerio: true,
+  json: false
+})
+
+connector.run()
 
 function toJson(body) {
   return JSON.parse(body.match(/\(((.*))\)/)[1])
-}
-
-async function fetchAndParseCommands(commandURL) {
-  const $ = await request(commandURL)
-
-  const formData = getFormData($)
-  const years = getYears($)
-
-  const commands = await getCommands(years, commandURL, formData)
-
-  const formatedCommands = commands.map(({ dates, ...command }) => ({
-    ...command,
-    date: dates.date,
-    vendor: 'Leclerc Drive',
-    currency: 'EUR',
-    filename: `${dates.isoDateString}-${String(command.amount).replace(
-      '.',
-      ','
-    )}EUR.pdf`
-  }))
-
-  return Promise.all(
-    formatedCommands.map(async ({ detailsLink, ...command }) => {
-      const $ = await request(detailsLink)
-      const products = scrape(
-        $,
-        {
-          title: {
-            sel: `td`,
-            fn: $el => {
-              const $tr = $el.closest('tr')
-              return `${$tr.attr('stitre1')} ${$tr.attr('stitre2')}`.trim()
-            }
-          },
-          id: {
-            sel: `td`,
-            fn: $el => {
-              const $tr = $el.closest('tr')
-              return $tr.attr('iidproduit')
-            }
-          },
-          number: {
-            sel: `p[class*='_Quantite']`,
-            parse: number => Number(number.replace('x', ''))
-          },
-          price: {
-            sel: `p[class*='_Prix']`,
-            parse: parseAmount
-          }
-        },
-        `tr[class*='LigneArticle']`
-      )
-
-      return {
-        ...command,
-        products
-      }
-    })
-  )
-}
-
-function getCommands(years, commandURL, formData) {
-  return Promise.all(
-    years.map(year =>
-      getCommandsForYear(commandURL, {
-        ...formData,
-        ...year
-      })
-    )
-  ).then(flatten)
 }
 
 function getYears($) {
@@ -190,40 +301,6 @@ function getFormData($) {
   return dataArray.reduce(
     (acc, input) => ({ ...acc, [input.name]: input.value }),
     {}
-  )
-}
-
-async function getCommandsForYear(commandUrl, formData) {
-  const $ = await request({
-    method: 'POST',
-    url: commandUrl,
-    form: formData
-  })
-  return scrape(
-    $,
-    {
-      commandNumber: {
-        sel: `a[id*='NumeroCommande']`,
-        parse: nb => nb.substr(2)
-      },
-      detailsLink: {
-        sel: `a[id*='NumeroCommande']`,
-        attr: 'href'
-      },
-      fileurl: {
-        sel: `a[href*='bon-de-commande.aspx']`,
-        attr: 'href'
-      },
-      dates: {
-        sel: `span[id*='_lblCommandeInfo']`,
-        parse: date => parseFrenchDate(date)
-      },
-      amount: {
-        sel: `p[class*='MontantCommande']`,
-        parse: parseAmount
-      }
-    },
-    `div[id*='_upHistoriqueCommandes'] div[class*='ResumeCommande']`
   )
 }
 
