@@ -1,12 +1,13 @@
 language: node_js
 node_js:
-- '8'
+- '12'
 env:
   global:
-  - GH_USER_EMAIL="travis@example.org"
-  - GH_USER_NAME="cozy-bot"
   - DEPLOY_REPOSITORY="git@github.com:konnectors/leclercdrive.git"
+  # REGISTRY_TOKEN(editor=cozy, app=leclercdrive)
   - secure: c0FrVAP3V+7Ln0lidd5UH//l1oqORLRRCKmLqsb+eU7PsQk6q9jFfpULxR44AAo6SVSEwuVQ8qGrq317DK0zRlzdQGepou5YsdZ9IaVAzQSUiVdV0E3OLKjfzLBwSHZEuOD+WHXq/EZiMB4eb5Os9juImrXlvoTAbCPpPIYSCuMCSEFombpcIgsL1cp4UHpMxKtIQ3InXaBYFAXTazPodZqGPDvxcwQMEyVe0aTi3A/lZ0ppYCdnu1fa31thTMJKQXQ38T7iiBHjIOCCbjltVz2j9yuvrHbOEpptlhSYKBok1u/Nxx0d9ZhAbQDV9TX7pN8EipffdS/qPu6PWOYdOM1ciPT11ixmcZ9JpKjR5uu+yLuGIWjNQ5wcTN71JL855btHTJIpkL/PA7THy4POrmwBcZrSNxpQ++iLg/wmeUlnwTp8sRGsh+ErqEdllhSDr2Q6i2iwdKLBq97xN9gedEc5d8CacoylphPcLfdBhhY1goUPe70/cDh0Jpgkh+35aqUNM70VviiAq20IR7XKi7U/Hh8GI2ZLpXmQ+odEWs22HnXjit4c9OQiCHfLj4X577ViJVaqt3goMsjBZobUt8UhEN/C7a81rXih6rBlbDUo8FlePmcbY9qsG2qMENPGiAG4rxsq7QXoHTDibVZOnx1Y47dxLLX4JyCWF2byu04=
+  # MATTERMOST_HOOK_URL
+  - secure: mdgZ3WaKF04/ZYvdam9wT73rbGTFPY2g82ap9fj8GMXTVSNeIpirDqns/rgLmZ6gv1fTx7r2DQOhMpKuJKz6qNGRCCMZcrhaRChObsCMmrDKjf+HicnuBXmSCs0Tn7n4G10z2vjaNpqMI7w3Lybnra8Qp0JN8/Z+LF0I9EC5vyntzwYJhRdG8Y4SWN1rL4p92a5rN3ypClsl38chA99l71udb68HoWGhjsriiCG6kErIvQysYFxB74UtM+NR+sfG3kqAkyI3FPl1/Xh2ZFOriCy+BvjkICpmrIQcTR3uWkqJtfQMQvDLc7mfUQJcb4AfF06/g7BG5A5+4SXbTw5szfy3xvI6Q0+7m9O83it3HweTsZq5gVWXMPWeNovUokV5nU/c+1blYg/C+3342lzgRE/EVUmaeecK8mNY4atix93aSGx1/ObDcW0zYmf32ZKzo/OcxhcnnXc65bELQP44thqE8b8VAyuhM53rM2G3HgyE9Dlzuto7zE2gip6tVYvGVgnWEOmczf9B8weuZH4hxBBZEoKTyFAqfCcp3VXGvG3WpPY93+Mq+rk5f/EhEh11Od5gKDtkvxwMTLKTQHn3b0rA8Lm/j1LjicFUd4lxG6wlNp95egOM/Jj9OXUKuRqsli48xIhK+c0eSGuJX8TI/IrNjH/du5f5S9n2rCd1N+Y=
 cache:
   yarn: true
   directories:
@@ -18,7 +19,6 @@ branches:
 script:
 - yarn lint
 - yarn build
-# - yarn run check
 deploy:
 - provider: script
   skip-cleanup: true
@@ -27,7 +27,7 @@ deploy:
     branch: master
 - provider: script
   skip-cleanup: true
-  script: DEPLOY_BRANCH=build yarn deploy && yarn cozyPublish
+  script: DEPLOY_BRANCH=build yarn deploy && yarn cozyPublish --postpublish mattermost
   on:
     tags: true
 before_install:

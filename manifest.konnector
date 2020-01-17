@@ -1,14 +1,16 @@
 {
-  "version": "1.0.5",
+  "version": "1.3.0",
   "name": "Leclerc Drive",
   "type": "konnector",
   "language": "node",
-  "icon": "icon.png",
+  "icon": "icon.svg",
   "slug": "leclercdrive",
-  "source": "git://github.com/konnectors/leclercdrive.git",
+  "source": "git@github.com:konnectors/leclercdrive.git",
   "editor": "Cozy",
   "vendor_link": "https://www.leclercdrive.fr",
-  "categories": ["shopping"],
+  "categories": [
+    "shopping"
+  ],
   "fields": {
     "login": {
       "type": "email"
@@ -23,6 +25,10 @@
       }
     }
   },
+  "time_interval": [
+    0,
+    24
+  ],
   "data_types": [
     "bill"
   ],
@@ -37,15 +43,17 @@
       "type": "io.cozy.files"
     },
     "accounts": {
-      "type": "io.cozy.accounts",
-      "verbs": ["GET"]
+      "type": "io.cozy.accounts"
     }
   },
   "developer": {
     "name": "Cozy Cloud",
     "url": "https://cozy.io"
   },
-  "langs": ["fr", "en"],
+  "langs": [
+    "fr",
+    "en"
+  ],
   "locales": {
     "fr": {
       "short_description": "Récupère vos bons de commande Leclerc Drive",
