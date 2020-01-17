@@ -290,7 +290,11 @@ function getYears($) {
     [yearSelectElement.attr('name')]: $(el).attr('value')
   }))
   if (years.length === 0) {
-    throw new Error(errors.VENDOR_DOWN)
+    if ($.text().includes(`Vous n'avez pas de commande actuellement`)) {
+      return []
+    } else {
+      throw new Error(errors.VENDOR_DOWN)
+    }
   }
   return years
 }
