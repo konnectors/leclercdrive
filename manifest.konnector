@@ -25,6 +25,10 @@
       }
     }
   },
+  "time_interval": [
+    0,
+    24
+  ],
   "data_types": [
     "bill"
   ],
@@ -39,10 +43,7 @@
       "type": "io.cozy.files"
     },
     "accounts": {
-      "type": "io.cozy.accounts",
-      "verbs": [
-        "GET"
-      ]
+      "type": "io.cozy.accounts"
     }
   },
   "developer": {
