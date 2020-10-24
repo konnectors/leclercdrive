@@ -37,16 +37,16 @@
     "travisDeployKey": "./bin/generate_travis_deploy_key"
   },
   "dependencies": {
-    "cozy-konnector-libs": "4.34.5",
+    "cozy-konnector-libs": "4.35.0",
     "lodash": "4.17.20"
   },
   "devDependencies": {
-    "copy-webpack-plugin": "6.1.0",
+    "copy-webpack-plugin": "6.2.1",
     "cozy-app-publish": "0.25.0",
     "cozy-jobs-cli": "1.13.7",
-    "eslint-config-cozy-app": "1.5.0",
+    "eslint-config-cozy-app": "2.0.0",
     "git-directory-deploy": "1.5.1",
-    "husky": "4.2.5",
+    "husky": "4.3.0",
     "svgo": "1.3.2",
     "webpack": "4.44.1",
     "webpack-cli": "3.3.12"
