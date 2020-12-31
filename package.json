@@ -41,7 +41,7 @@
     "lodash": "4.17.20"
   },
   "devDependencies": {
-    "copy-webpack-plugin": "6.3.2",
+    "copy-webpack-plugin": "6.4.1",
     "cozy-app-publish": "0.26.0",
     "cozy-jobs-cli": "1.15.1",
     "eslint-config-cozy-app": "2.0.0",
