@@ -41,7 +41,7 @@
     "lodash": "4.17.20"
   },
   "devDependencies": {
-    "cozy-jobs-cli": "1.15.7",
+    "cozy-jobs-cli": "1.15.9",
     "cozy-konnector-build": "1.1.5"
   }
 }
