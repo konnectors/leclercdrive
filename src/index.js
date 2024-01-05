@@ -1,7 +1,3 @@
-process.env.SENTRY_DSN =
-  process.env.SENTRY_DSN ||
-  'https://1f3bcbb057c5435da229ff1039b48baf:1d9127715e7c4f728509d22a2bfe99a5@sentry.cozycloud.cc/47'
-
 const {
   CookieKonnector,
   scrape,
